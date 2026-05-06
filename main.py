@@ -4,7 +4,7 @@ from config.resume_parser import parse_resume
 from lib.query_builder import build_search_queries
 from config.tinyfish_client import search_jobs, fetch_job_details
 from lib.job_scorer import score_all_jobs, score_job
-from lib.excel_writer import save_to_excel, get_existing_urls
+from lib.db import save_to_db, get_existing_urls_db
 
 def run():
     print("Parsing resume...")
@@ -17,8 +17,8 @@ def run():
     print("Searching for jobs...")
     all_jobs = []
     
-    # Load existing URLs to avoid re-processing duplicates
-    seen_urls = get_existing_urls("jobs.xlsx")
+    # Load existing URLs from Postgres to avoid re-processing duplicates
+    seen_urls = get_existing_urls_db()
     initial_seen_count = len(seen_urls)
     if initial_seen_count > 0:
         print(f"Loaded {initial_seen_count} existing jobs to skip duplicates.")
@@ -68,8 +68,8 @@ def run():
 
     print(f"{len(final_jobs)} high-quality jobs after re-scoring")
 
-    print("Saving to Excel...")
-    save_to_excel(final_jobs)
+    print("Saving to Postgres database...")
+    save_to_db(final_jobs)
     print("Done.")
 
 if __name__ == "__main__":
