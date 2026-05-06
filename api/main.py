@@ -62,3 +62,13 @@ def mark_job_applied(job_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     return {"status": "success", "applied": job.applied}
+
+from fastapi.responses import FileResponse
+
+@app.get("/api/resume")
+def download_resume():
+    """Download the candidate's resume PDF."""
+    file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resume.pdf")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return FileResponse(path=file_path, filename="Ramlal_Resume.pdf", media_type="application/pdf")

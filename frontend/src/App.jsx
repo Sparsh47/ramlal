@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import { ExternalLink, Check, Zap, Search, LayoutTemplate } from 'lucide-react'
+import { ExternalLink, Check, Zap, Search, LayoutTemplate, FileText, Download } from 'lucide-react'
 import './App.css'
 
 function App() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [minScore, setMinScore] = useState(0)
 
   useEffect(() => {
     fetchJobs()
@@ -33,9 +35,20 @@ function App() {
     }
   }
 
-  const readyJobs = jobs.filter(j => j.auto_apply_ready && !j.applied)
-  const manualJobs = jobs.filter(j => !j.auto_apply_ready && !j.applied)
-  const appliedJobs = jobs.filter(j => j.applied)
+  const handleDownloadResume = () => {
+    window.open('http://localhost:8000/api/resume', '_blank')
+  }
+
+  const filteredJobs = jobs.filter(job => {
+    const matchesSearch = job.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          job.company.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesScore = job.score >= minScore
+    return matchesSearch && matchesScore
+  })
+
+  const readyJobs = filteredJobs.filter(j => j.auto_apply_ready && !j.applied)
+  const manualJobs = filteredJobs.filter(j => !j.auto_apply_ready && !j.applied)
+  const appliedJobs = filteredJobs.filter(j => j.applied)
 
   if (loading) {
     return (
@@ -78,11 +91,36 @@ function App() {
           <LayoutTemplate size={24} color="var(--text-main)" />
           <h1>Ramlal</h1>
         </div>
-        <div className="stats">
-          <span>{jobs.length} Total</span>
-          <span>{appliedJobs.length} Applied</span>
+        <div className="header-actions">
+          <button className="btn btn-primary" onClick={handleDownloadResume}>
+            <Download size={14} /> My Resume
+          </button>
         </div>
       </header>
+
+      <div className="toolbar">
+        <div className="search-box">
+          <Search size={16} color="var(--text-muted)" />
+          <input 
+            type="text" 
+            placeholder="Search by title or company..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="filter-box">
+          <select value={minScore} onChange={(e) => setMinScore(Number(e.target.value))}>
+            <option value={0}>All Scores</option>
+            <option value={7}>Score 7.0+</option>
+            <option value={8}>Score 8.0+</option>
+            <option value={9}>Score 9.0+</option>
+          </select>
+        </div>
+        <div className="stats">
+          <span>{filteredJobs.length} Matches</span>
+          <span>{appliedJobs.length} Applied</span>
+        </div>
+      </div>
 
       <div className="kanban-board">
         
