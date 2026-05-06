@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import time
 from config.resume_parser import parse_resume
 from lib.query_builder import build_search_queries
