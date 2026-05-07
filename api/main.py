@@ -44,6 +44,12 @@ class JobResponse(BaseModel):
     class Config:
         from_attributes = True
 
+@app.get("/health")
+@app.get("/api/health")
+def health_check():
+    """Health check endpoint to verify the server is running."""
+    return {"status": "ok"}
+
 @app.get("/api/jobs", response_model=list[JobResponse])
 def get_jobs(db: Session = Depends(get_db)):
     """Fetch all jobs, sorted by score descending."""
