@@ -33,17 +33,19 @@ def get_db():
     finally:
         db.close()
 
+from typing import Optional
+
 # Define Pydantic models for responses
 class JobResponse(BaseModel):
     id: int
-    score: float
-    auto_apply_ready: bool
-    scored_on: str
-    title: str
-    company: str
-    reasons: str
-    url: str
-    applied: bool
+    score: Optional[float] = 0.0
+    auto_apply_ready: Optional[bool] = False
+    scored_on: Optional[str] = ""
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    reasons: Optional[str] = ""
+    url: Optional[str] = ""
+    applied: Optional[bool] = False
 
     class Config:
         from_attributes = True
