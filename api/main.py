@@ -77,4 +77,4 @@ def download_resume():
     file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resume.pdf")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Resume not found")
-    return FileResponse(path=file_path, filename="Ramlal_Resume.pdf", media_type="application/pdf")
+    return FileResponse(path=file_path, filename="Resume.pdf", media_type="application/pdf")
