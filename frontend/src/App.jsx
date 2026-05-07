@@ -15,7 +15,7 @@ function App() {
 
   const fetchJobs = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/jobs')
+      const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/jobs`)
       setJobs(response.data)
       setLoading(false)
     } catch (error) {
@@ -26,7 +26,7 @@ function App() {
 
   const toggleApply = async (id) => {
     try {
-      const response = await axios.put(`http://localhost:8000/api/jobs/${id}/apply`)
+      const response = await axios.put(`${import.meta.env.VITE_API_URL}/api/jobs/${id}/apply`)
       setJobs(jobs.map(job => 
         job.id === id ? { ...job, applied: response.data.applied } : job
       ))
@@ -36,7 +36,7 @@ function App() {
   }
 
   const handleDownloadResume = () => {
-    window.open('http://localhost:8000/api/resume', '_blank')
+    window.open(`${import.meta.env.VITE_API_URL}/api/resume`, '_blank')
   }
 
   const filteredJobs = jobs.filter(job => {
