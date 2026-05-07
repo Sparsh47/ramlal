@@ -15,7 +15,11 @@ app = FastAPI(title="Job Agent API")
 # Allow requests from our frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the actual frontend URL
+    allow_origins=[
+        "https://ramlal-blush.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
