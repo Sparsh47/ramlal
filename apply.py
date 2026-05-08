@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-apply.py — Automated job application agent.
+apply.py — Automated job application agent (hybrid flow).
 
-For each eligible job (status='New', retry_count < 3, auto_apply_ready=True):
-  1. Derives the application URL from the job URL
-  2. Calls Hermes to inspect the form fields on that URL
-  3. Generates a tailored cover letter via the LLM
-  4. Calls Hermes to fill and submit the form
-  5. Marks the job as Agent Applied or Agent Failed in the DB
+Hybrid flow:
+  4:00 AM  → main.py scrapes jobs, scores them, saves with status='New'
+  Morning  → You review new jobs on the Kanban dashboard
+           → Move interesting ones to 'Saved', discard the rest
+  On demand → You run: python apply.py
+           → Picks only 'Saved' jobs (auto_apply_ready=True, retry_count < 3)
+           → Inspects form fields on the apply URL via Hermes
+           → Generates a tailored cover letter via the LLM
+           → Hermes fills and submits the application form
+           → Marks job as 'Agent Applied' or 'Agent Failed' in the DB
+  Evening  → Review 'Agent Failed' jobs on the dashboard, apply manually
 
-Run manually:
+Run manually (on your Mac, after moving jobs to Saved on the dashboard):
     python apply.py
-
-Or via cron (after the scraper):
-    30 4 * * * cd /root/ramlal && /root/ramlal/.venv/bin/python /root/ramlal/apply.py >> /root/ramlal/apply.log 2>&1
 """
 
 import os

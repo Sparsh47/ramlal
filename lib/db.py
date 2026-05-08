@@ -136,7 +136,12 @@ def save_to_db(jobs: list[dict]):
 def get_eligible_jobs() -> list[dict]:
     """
     Return jobs that are ready for the agent to attempt applying.
-    Criteria: status = 'New' AND retry_count < 3
+    Criteria: status = 'Saved' AND retry_count < 3
+
+    Jobs must be manually moved to 'Saved' on the Kanban dashboard before
+    apply.py will pick them up. This is the manual review gate in the hybrid
+    flow: New → (you review) → Saved → (agent applies) → Agent Applied/Failed.
+
     Ordered by score descending so the best matches are attempted first.
     Returns plain dicts (not SQLAlchemy objects) so they are safe to use
     outside of a session context.
@@ -145,7 +150,7 @@ def get_eligible_jobs() -> list[dict]:
     try:
         jobs = (
             session.query(Job)
-            .filter(Job.status == "New", Job.retry_count < 3)
+            .filter(Job.status == "Saved", Job.retry_count < 3)
             .order_by(Job.score.desc())
             .all()
         )
