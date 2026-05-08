@@ -17,12 +17,19 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
 
-# Default to the local docker-compose postgres credentials
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://jobagent:password@localhost:5432/jobsdb"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise EnvironmentError(
+        "DATABASE_URL is not set. Add it to your .env file.\n"
+        "Get it from: Supabase → project → Settings → Database → Connection string → URI\n"
+        "It should look like: postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres"
+    )
 
-engine = create_engine(DATABASE_URL)
+# Supabase requires SSL — add sslmode=require if not already in the URL
+if "supabase" in DATABASE_URL and "sslmode" not in DATABASE_URL:
+    DATABASE_URL += "?sslmode=require"
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -122,5 +129,99 @@ def save_to_db(jobs: list[dict]):
     except Exception as e:
         session.rollback()
         print(f"Database error: {e}")
+    finally:
+        session.close()
+
+
+def get_eligible_jobs() -> list[dict]:
+    """
+    Return jobs that are ready for the agent to attempt applying.
+    Criteria: status = 'New' AND retry_count < 3
+    Ordered by score descending so the best matches are attempted first.
+    Returns plain dicts (not SQLAlchemy objects) so they are safe to use
+    outside of a session context.
+    """
+    session = SessionLocal()
+    try:
+        jobs = (
+            session.query(Job)
+            .filter(Job.status == "New", Job.retry_count < 3)
+            .order_by(Job.score.desc())
+            .all()
+        )
+        # Convert each ORM object to a plain dict before closing the session
+        return [
+            {
+                "id": job.id,
+                "url": job.url,
+                "title": job.title,
+                "company": job.company,
+                "score": job.score,
+                "reasons": job.reasons,
+                "scored_on": job.scored_on,
+                "auto_apply_ready": job.auto_apply_ready,
+                "retry_count": job.retry_count,
+                "status": job.status,
+                "date_found": job.date_found,
+                "applied_at": job.applied_at,
+                "last_attempted_at": job.last_attempted_at,
+                "agent_failure_reason": job.agent_failure_reason,
+            }
+            for job in jobs
+        ]
+    finally:
+        session.close()
+
+
+def mark_agent_applied(job_id: int) -> None:
+    """
+    Mark a job as successfully applied to by the agent.
+    - Sets status to 'Agent Applied'
+    - Stamps applied_at only on the first application (preserves original if already set)
+    - Always updates last_attempted_at to now
+    """
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        job.status = "Agent Applied"
+        job.last_attempted_at = datetime.utcnow()
+        # Only stamp applied_at the very first time — never overwrite an existing timestamp
+        if job.applied_at is None:
+            job.applied_at = datetime.utcnow()
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def mark_agent_failed(job_id: int, reason: str) -> None:
+    """
+    Mark a job as failed by the agent.
+    - Sets status to 'Agent Failed'
+    - Stores the failure reason string
+    - Increments retry_count by 1 (reads current value, never hardcodes)
+    - Stamps last_attempted_at to now
+    """
+    session = SessionLocal()
+    try:
+        job = session.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        job.status = "Agent Failed"
+        job.agent_failure_reason = reason
+        job.retry_count = (job.retry_count or 0) + 1
+        job.last_attempted_at = datetime.utcnow()
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
