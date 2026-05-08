@@ -59,6 +59,9 @@ class JobResponse(BaseModel):
     status: Optional[str] = "New"
     applied_at: Optional[datetime] = None
     date_found: Optional[datetime] = None
+    agent_failure_reason: Optional[str] = None
+    retry_count: Optional[int] = 0
+    last_attempted_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -118,7 +121,16 @@ def mark_job_applied(job_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "applied": job.applied}
 
 
-VALID_STATUSES = ["New", "Saved", "Applied", "Interview", "Rejected", "Offer"]
+VALID_STATUSES = [
+    "New",
+    "Saved",
+    "Applied",
+    "Interview",
+    "Rejected",
+    "Offer",
+    "Agent Applied",
+    "Agent Failed",
+]
 
 
 @app.put("/api/jobs/{job_id}/status", response_model=JobResponse)

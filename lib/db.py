@@ -42,6 +42,9 @@ class Job(Base):
     applied = Column(Boolean, default=False)
     status = Column(String, default="New")
     applied_at = Column(DateTime, nullable=True)
+    agent_failure_reason = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+    last_attempted_at = Column(DateTime, nullable=True)
 
 
 def run_migrations():
@@ -54,6 +57,19 @@ def run_migrations():
         )
         conn.execute(
             text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP")
+        )
+        conn.execute(
+            text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS agent_failure_reason TEXT")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMP"
+            )
         )
         conn.commit()
 

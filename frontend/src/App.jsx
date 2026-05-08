@@ -13,7 +13,16 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const STATUSES = ["New", "Saved", "Applied", "Interview", "Rejected", "Offer"];
+const STATUSES = [
+  "New",
+  "Saved",
+  "Applied",
+  "Interview",
+  "Rejected",
+  "Offer",
+  "Agent Applied",
+  "Agent Failed",
+];
 const STATUS_COLORS = {
   New: "#6b7280",
   Saved: "#3b82f6",
@@ -21,6 +30,8 @@ const STATUS_COLORS = {
   Interview: "#f59e0b",
   Rejected: "#ef4444",
   Offer: "#10b981",
+  "Agent Applied": "#06b6d4",
+  "Agent Failed": "#f97316",
 };
 
 const STATUS_ICONS = {
@@ -30,6 +41,8 @@ const STATUS_ICONS = {
   Interview: <Calendar size={15} />,
   Rejected: <X size={15} />,
   Offer: <Zap size={15} />,
+  "Agent Applied": <Zap size={15} />,
+  "Agent Failed": <X size={15} />,
 };
 
 function App() {
