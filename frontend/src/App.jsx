@@ -147,6 +147,79 @@ function StatusMenu({ status, onChange }) {
   );
 }
 
+function StatusFilterMenu({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = value || "All statuses";
+  const meta = value ? STATUS_META[value] : { color: "#8b817a", soft: "#f1ede9", icon: Filter };
+  const StatusIcon = meta.icon;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeMenu = (event) => {
+      if (!event.target.closest(".status-filter-menu")) setOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("touchstart", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("touchstart", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="status-filter-menu">
+      <button
+        type="button"
+        className={`status-filter-trigger ${open ? "open" : ""} ${value ? "has-value" : ""}`}
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Status filter: ${selected}`}
+      >
+        <span className="status-filter-icon" style={{ color: meta.color, background: meta.soft }}>
+          <StatusIcon size={12} />
+        </span>
+        <span>{selected}</span>
+        <ChevronDown size={12} className="status-filter-chevron" />
+      </button>
+      {open && (
+        <div className="status-filter-list" role="listbox">
+          <div className="status-menu-heading">Filter by status</div>
+          {["", ...STATUSES].map((option) => {
+            const optionMeta = option ? STATUS_META[option] : { color: "#8b817a", soft: "#f1ede9", icon: Filter };
+            const OptionIcon = optionMeta.icon;
+            const isSelected = option === value;
+            return (
+              <button
+                type="button"
+                key={option || "all"}
+                className={`status-option ${isSelected ? "selected" : ""}`}
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                }}
+                role="option"
+                aria-selected={isSelected}
+              >
+                <span className="status-option-icon" style={{ color: optionMeta.color, background: optionMeta.soft }}>
+                  <OptionIcon size={12} />
+                </span>
+                <span>{option || "All statuses"}</span>
+                {isSelected && <CheckCircle2 size={13} className="status-option-check" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SCORE_OPTIONS = [
   { value: 0, label: "Any match score", desc: "All scored roles", badge: "All" },
   { value: 7, label: "Score 7.0+", desc: "Good fit & above", badge: "7.0+" },
@@ -821,7 +894,9 @@ function App() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [uploadingResume, setUploadingResume] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const resumeInputRef = useRef(null);
+  const PAGE_SIZE = 9;
 
   async function fetchJobs(showLoading = true) {
     if (showLoading) setLoading(true);
@@ -870,6 +945,10 @@ function App() {
     const matchesTo = !dateTo || !found || found <= new Date(`${dateTo}T23:59:59`);
     return matchesSearch && matchesStatus && matchesScore && matchesFrom && matchesTo;
   }), [dateFrom, dateTo, jobs, minScore, search, statusFilter]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activePage, dateFrom, dateTo, jobs.length, minScore, search, statusFilter]);
 
   const counts = useMemo(() => STATUSES.reduce((result, status) => {
     result[status] = jobs.filter((job) => (job.status || "New") === status).length;
@@ -949,7 +1028,7 @@ function App() {
   const renderFilterBar = () => (
     <div className="filter-panel">
       <div className="search-box"><Search size={16} /><input type="search" placeholder="Search roles or companies" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-      <div className="filter-select-wrap"><Filter size={14} /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select></div>
+      <StatusFilterMenu value={statusFilter} onChange={setStatusFilter} />
       <ScoreDropdown value={minScore} onChange={setMinScore} />
       <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={(from, to) => { setDateFrom(from); setDateTo(to); }} />
       {(search || statusFilter || minScore || dateFrom || dateTo) && <button className="clear-filter" onClick={() => { setSearch(""); setStatusFilter(""); setMinScore(0); setDateFrom(""); setDateTo(""); }}><X size={14} /> Clear</button>}
@@ -973,15 +1052,27 @@ function App() {
   const renderListingPage = (type) => {
     const isRecommended = type === "recommended";
     const isApplications = type === "applications";
-    const source = isRecommended ? recommendedJobs : isApplications ? applicationJobs : filteredJobs;
-    return <><section className="page-intro"><div><p className="eyebrow">{isRecommended ? "Curated matches" : isApplications ? "Your progress" : "Opportunity library"}</p><h1>{isRecommended ? "Recommended roles" : isApplications ? "Application pipeline" : "All opportunities"}</h1><p className="welcome-copy">{isRecommended ? "Roles with the strongest fit and the clearest next step." : isApplications ? "Track every role you have moved beyond the discovery stage." : "Every role discovered, scored, and ready for your review."}</p></div><button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh data</button></section><div className="listing-toolbar">{renderFilterBar()}<button className={`view-toggle ${compactView ? "active" : ""}`} onClick={() => setCompactView((value) => !value)}><Settings2 size={15} /> {compactView ? "Comfortable view" : "Compact view"}</button></div><div className="listing-meta"><strong>{source.length}</strong> roles in this view {lastRefresh && <span>Last refreshed {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>{source.length ? <div className={`job-grid ${compactView ? "compact-grid" : ""}`}>{source.map((job) => <JobCard key={job.id} job={job} />)}</div> : <EmptyState title="Nothing matches these filters" text="Try clearing a filter or browse a different workspace view." />}</>;
+    const baseSource = isRecommended ? recommendedJobs : isApplications ? applicationJobs : filteredJobs;
+    const source = baseSource.filter((job) => {
+      const query = search.toLowerCase();
+      const found = job.date_found ? new Date(job.date_found) : null;
+      return (!query || job.title?.toLowerCase().includes(query) || job.company?.toLowerCase().includes(query))
+        && (!statusFilter || (job.status || "New") === statusFilter)
+        && (!minScore || (job.score || 0) >= minScore)
+        && (!dateFrom || !found || found >= new Date(`${dateFrom}T00:00:00`))
+        && (!dateTo || !found || found <= new Date(`${dateTo}T23:59:59`));
+    });
+    const pageCount = Math.ceil(source.length / PAGE_SIZE);
+    const visibleJobs = source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    const firstVisible = source.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+    const lastVisible = Math.min(currentPage * PAGE_SIZE, source.length);
+    return <><section className="page-intro"><div><p className="eyebrow">{isRecommended ? "Curated matches" : isApplications ? "Your progress" : "Opportunity library"}</p><h1>{isRecommended ? "Recommended roles" : isApplications ? "Application pipeline" : "All opportunities"}</h1><p className="welcome-copy">{isRecommended ? "Roles with the strongest fit and the clearest next step." : isApplications ? "Track every role you have moved beyond the discovery stage." : "Every role discovered, scored, and ready for your review."}</p></div><button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh data</button></section><div className="listing-toolbar">{renderFilterBar()}<button className={`view-toggle ${compactView ? "active" : ""}`} onClick={() => setCompactView((value) => !value)}><Settings2 size={15} /> {compactView ? "Comfortable view" : "Compact view"}</button></div><div className="listing-meta"><strong>{source.length}</strong> roles in this view {source.length > 0 && <span>Showing {firstVisible}–{lastVisible}</span>} {lastRefresh && <span>Last refreshed {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>{source.length ? <><div className={`job-grid ${compactView ? "compact-grid" : ""}`}>{visibleJobs.map((job) => <JobCard key={job.id} job={job} />)}</div>{pageCount > 1 && <div className="pagination" aria-label="Job pagination"><button type="button" className="pagination-button" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} aria-label="First page"><ChevronsLeft size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page"><ChevronLeft size={14} /></button><div className="pagination-pages">{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" key={page} className={`pagination-page ${page === currentPage ? "active" : ""}`} onClick={() => setCurrentPage(page)} aria-current={page === currentPage ? "page" : undefined}>{page}</button>)}</div><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))} disabled={currentPage === pageCount} aria-label="Next page"><ChevronRight size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage(pageCount)} disabled={currentPage === pageCount} aria-label="Last page"><ChevronsRight size={14} /></button></div>}</> : <EmptyState title="Nothing matches these filters" text="Try clearing a filter or browse a different workspace view." />}</>;
   };
 
   const renderProfile = () => <><section className="page-intro"><div><p className="eyebrow">Your foundation</p><h1>Profile & resume</h1><p className="welcome-copy">Keep your application materials close and ready for the next opportunity.</p></div><button className="primary-button" onClick={() => resumeInputRef.current?.click()} disabled={uploadingResume}><Upload size={15} /> {uploadingResume ? "Updating ratings…" : "Upload latest resume"}</button></section><input ref={resumeInputRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={uploadResume} /><div className="profile-grid"><div className="profile-card profile-hero"><div className="large-avatar">S</div><div><h2>Sparsh</h2><p>Candidate profile</p><span className="profile-status"><i /> Resume available</span></div></div><div className="profile-card"><div className="profile-card-title"><UserRound size={16} /><h3>Profile readiness</h3></div><div className="readiness-track"><i style={{ width: "86%" }} /></div><strong className="readiness-value">86%</strong><p className="card-note">Your resume is being used to score every opportunity.</p></div><div className="profile-card profile-details"><div className="profile-card-title"><BriefcaseBusiness size={16} /><h3>Workspace details</h3></div><div className="detail-row"><span>Roles tracked</span><strong>{jobs.length}</strong></div><div className="detail-row"><span>Average match</span><strong>{averageScore}/10</strong></div><div className="detail-row"><span>Ready to apply</span><strong>{recommendedJobs.length}</strong></div></div><div className="profile-card resume-card"><div className="resume-illustration"><FileIcon /></div><div><h3>Resume.pdf</h3><p>Upload a newer PDF to refresh this profile and recalculate every job score.</p><div className="resume-actions"><button className="secondary-button" onClick={downloadResume}><Download size={14} /> Open resume</button><button className="secondary-button" onClick={() => resumeInputRef.current?.click()} disabled={uploadingResume}><Upload size={14} /> Replace</button></div>{resumeMessage && <span className="resume-message">{resumeMessage}</span>}</div></div></div></>;
   const FileIcon = () => <div className="file-icon"><span>PDF</span></div>;
 
   const navItems = [{ id: "overview", label: "Overview", icon: LayoutDashboard }, { id: "all", label: "All opportunities", icon: BriefcaseBusiness, count: jobs.length }, { id: "recommended", label: "Recommended", icon: Sparkles, count: recommendedJobs.length }, { id: "applications", label: "Applications", icon: Send, count: applicationJobs.length }];
-  const statusNav = ["New", "Saved", "Applied", "Interview"];
   const pageTitle = activePage === "overview" ? "Overview" : activePage === "all" ? "All opportunities" : activePage === "recommended" ? "Recommended" : activePage === "applications" ? "Applications" : "Profile & resume";
 
   return <div className="app-shell">
@@ -1008,12 +1099,6 @@ function App() {
             <Icon size={16} /><span className="nav-text">{label}</span>{count !== undefined && <b>{count}</b>}
           </button>
         ))}
-        <span className="nav-label status-label">By status</span>
-        {statusNav.map((status) => { const Icon = STATUS_META[status].icon; return (
-          <button className="nav-item" key={status} onClick={() => goTo("applications", status)} title={sidebarCollapsed ? status : undefined}>
-            <Icon size={15} style={{ color: STATUS_META[status].color }} /><span className="nav-text">{status}</span><b>{counts[status]}</b>
-          </button>
-        ); })}
       </nav>
       <div className="sidebar-bottom">
         <button className="profile-mini" onClick={() => goTo("profile")} title={sidebarCollapsed ? "My profile" : undefined}>
