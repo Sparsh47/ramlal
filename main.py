@@ -11,7 +11,7 @@ sys.path.insert(0, BASE_DIR)
 
 from config.resume_parser import parse_resume
 from config.tinyfish_client import fetch_job_details, search_jobs
-from lib.db import get_existing_urls_db, save_to_db
+from lib.db import get_existing_urls_db, materialize_resume, save_to_db
 from lib.job_scorer import score_all_jobs, score_job
 from lib.query_builder import build_search_queries
 
@@ -31,8 +31,11 @@ def check_env():
             missing.append(var)
     if missing:
         raise EnvironmentError(f"Missing required env vars: {', '.join(missing)}")
+    materialize_resume(RESUME_PATH)
     if not os.path.exists(RESUME_PATH):
-        raise FileNotFoundError(f"Resume not found at {RESUME_PATH}")
+        raise FileNotFoundError(
+            "Resume not found in Supabase or local filesystem. Upload one through the app first."
+        )
 
 
 def run():

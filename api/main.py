@@ -14,13 +14,13 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
 from config.resume_parser import parse_resume
-from lib.db import Job, SessionLocal
+from lib.db import Job, SessionLocal, get_resume_document, save_resume_document
 from lib.job_scorer import score_job
 
 app = FastAPI(title="Job Agent API")
@@ -112,12 +112,15 @@ def _score_one_job(job_data: dict, resume_profile: dict) -> tuple[int, dict | No
         return job_data["id"], None, str(exc)
 
 
-def _process_resume_upload(job_id: str, temporary_path: Path, destination: Path):
+def _process_resume_upload(job_id: str, resume_bytes: bytes):
     """Parse and re-score outside the request so uploads never block the API."""
     try:
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(resume_bytes)
         _set_resume_job(job_id, status="parsing", message="Parsing your resume…")
         resume_profile = parse_resume(str(temporary_path))
-        os.replace(temporary_path, destination)
+        save_resume_document(resume_bytes)
 
         db = SessionLocal()
         try:
@@ -181,7 +184,7 @@ def _process_resume_upload(job_id: str, temporary_path: Path, destination: Path)
     except Exception as exc:
         _set_resume_job(job_id, status="failed", message=str(exc))
     finally:
-        if temporary_path.exists():
+        if "temporary_path" in locals() and temporary_path.exists():
             temporary_path.unlink()
 
 
@@ -282,6 +285,13 @@ def discard_job(job_id: int, db: Session = Depends(get_db)):
 @app.get("/api/resume")
 def download_resume():
     """Download the candidate's resume PDF."""
+    resume = get_resume_document()
+    if resume:
+        return Response(
+            content=resume.data,
+            media_type=resume.content_type,
+            headers={"Content-Disposition": f'inline; filename="{resume.filename}"'},
+        )
     file_path = _resume_path()
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -298,21 +308,17 @@ async def upload_resume(
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=415, detail="Only PDF resumes are supported")
 
-    destination = Path(_resume_path())
-    with tempfile.NamedTemporaryFile(
-        mode="wb", suffix=".pdf", dir=destination.parent, delete=False
-    ) as temporary_file:
-        temporary_path = Path(temporary_file.name)
-        total_bytes = 0
-        while chunk := await file.read(1024 * 1024):
-            total_bytes += len(chunk)
-            if total_bytes > 10 * 1024 * 1024:
-                temporary_path.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=413, detail="Resume must be 10 MB or smaller"
-                )
-            temporary_file.write(chunk)
+    chunks = []
+    total_bytes = 0
+    while chunk := await file.read(1024 * 1024):
+        total_bytes += len(chunk)
+        if total_bytes > 10 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413, detail="Resume must be 10 MB or smaller"
+            )
+        chunks.append(chunk)
     await file.close()
+    resume_bytes = b"".join(chunks)
 
     job_id = uuid.uuid4().hex
     with _resume_jobs_lock:
@@ -322,7 +328,7 @@ async def upload_resume(
             "total": 0,
             "completed": 0,
         }
-    background_tasks.add_task(_process_resume_upload, job_id, temporary_path, destination)
+    background_tasks.add_task(_process_resume_upload, job_id, resume_bytes)
     return {"status": "queued", "job_id": job_id}
 
 

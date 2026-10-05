@@ -32,7 +32,12 @@ sys.path.insert(0, BASE_DIR)
 
 from config.resume_parser import parse_resume
 from lib.cover_letter import generate_cover_letter
-from lib.db import get_eligible_jobs, mark_agent_applied, mark_agent_failed
+from lib.db import (
+    get_eligible_jobs,
+    materialize_resume,
+    mark_agent_applied,
+    mark_agent_failed,
+)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -311,6 +316,7 @@ def run(limit: int | None = None) -> None:
     log("=" * 60)
 
     # Load resume data once — used for cover letter generation and candidate info
+    materialize_resume(RESUME_PATH)
     if not os.path.exists(RESUME_PATH):
         log(f"FATAL: Resume not found at {RESUME_PATH}")
         sys.exit(1)

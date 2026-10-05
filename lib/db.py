@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     Integer,
+    LargeBinary,
     String,
     Text,
     create_engine,
@@ -55,6 +56,16 @@ class Job(Base):
     last_attempted_at = Column(DateTime, nullable=True)
 
 
+class ResumeDocument(Base):
+    __tablename__ = "resume_documents"
+
+    id = Column(Integer, primary_key=True)
+    filename = Column(String, nullable=False, default="resume.pdf")
+    content_type = Column(String, nullable=False, default="application/pdf")
+    data = Column(LargeBinary, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def run_migrations():
     """Alembic-free migrations: adds new columns to existing tables if they don't exist."""
     with engine.connect() as conn:
@@ -86,6 +97,44 @@ def run_migrations():
 # Create tables then apply any outstanding column-level migrations
 Base.metadata.create_all(bind=engine)
 run_migrations()
+
+
+def save_resume_document(data: bytes, filename: str = "resume.pdf") -> None:
+    session = SessionLocal()
+    try:
+        resume = session.get(ResumeDocument, 1)
+        if resume is None:
+            resume = ResumeDocument(id=1)
+            session.add(resume)
+        resume.filename = filename
+        resume.content_type = "application/pdf"
+        resume.data = data
+        resume.updated_at = datetime.utcnow()
+        session.commit()
+    finally:
+        session.close()
+
+
+def get_resume_document() -> ResumeDocument | None:
+    session = SessionLocal()
+    try:
+        resume = session.get(ResumeDocument, 1)
+        if resume is None:
+            return None
+        session.expunge(resume)
+        return resume
+    finally:
+        session.close()
+
+
+def materialize_resume(path: str) -> bool:
+    """Write the durable database resume to a local path for PDF consumers."""
+    resume = get_resume_document()
+    if resume is None:
+        return False
+    with open(path, "wb") as file:
+        file.write(resume.data)
+    return True
 
 
 def get_existing_urls_db() -> set[str]:
