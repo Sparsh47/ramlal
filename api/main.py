@@ -26,6 +26,8 @@ from lib.job_scorer import score_job
 app = FastAPI(title="Job Agent API")
 _resume_jobs: dict[str, dict] = {}
 _resume_jobs_lock = threading.Lock()
+_apply_jobs: dict[str, dict] = {}
+_apply_jobs_lock = threading.Lock()
 
 frontend_origins = [
     origin.strip()
@@ -103,6 +105,90 @@ def _job_for_scoring(job: Job) -> dict:
 def _set_resume_job(job_id: str, **updates):
     with _resume_jobs_lock:
         _resume_jobs[job_id].update(updates)
+
+
+def _set_apply_job(job_id: str, **updates):
+    with _apply_jobs_lock:
+        _apply_jobs[job_id].update(updates)
+
+
+def _process_apply_job(run_id: str):
+    """Run the existing application agent away from the request thread."""
+    try:
+        from apply import (
+            CANDIDATE,
+            RESUME_PATH,
+            apply_to_job,
+            is_supported,
+        )
+        from config.resume_parser import parse_resume
+        from lib.db import (
+            get_eligible_jobs,
+            mark_agent_failed,
+            materialize_resume,
+        )
+
+        materialize_resume(RESUME_PATH)
+        if not os.path.exists(RESUME_PATH):
+            raise RuntimeError("No resume is available. Upload a resume first.")
+
+        CANDIDATE.update(parse_resume(RESUME_PATH))
+        for key, default in {
+            "email": os.getenv("CANDIDATE_EMAIL", ""),
+            "phone": os.getenv("CANDIDATE_PHONE", ""),
+            "linkedin": os.getenv("CANDIDATE_LINKEDIN", ""),
+            "github": os.getenv("CANDIDATE_GITHUB", ""),
+            "portfolio": os.getenv("CANDIDATE_PORTFOLIO", ""),
+            "current_company": "Freelance / Independent",
+            "notice_period": "0-15 Days",
+        }.items():
+            CANDIDATE.setdefault(key, default)
+
+        jobs = [
+            job for job in get_eligible_jobs()
+            if job.get("auto_apply_ready") and is_supported(job.get("url", ""))
+        ]
+        _set_apply_job(
+            run_id,
+            status="running",
+            total=len(jobs),
+            completed=0,
+            message=f"Applying to 0 of {len(jobs)} eligible roles…",
+        )
+
+        results = []
+        for index, job in enumerate(jobs, 1):
+            try:
+                apply_to_job(job)
+                results.append({"id": job["id"], "title": job["title"], "status": "completed"})
+            except Exception as exc:
+                reason = str(exc)[:400]
+                try:
+                    mark_agent_failed(job["id"], reason)
+                except Exception:
+                    pass
+                results.append({
+                    "id": job["id"],
+                    "title": job["title"],
+                    "status": "failed",
+                    "error": reason,
+                })
+            _set_apply_job(
+                run_id,
+                completed=index,
+                message=f"Applying to {index} of {len(jobs)} eligible roles…",
+                results=results,
+            )
+
+        _set_apply_job(
+            run_id,
+            status="completed",
+            message=f"Agent finished: {sum(r['status'] == 'completed' for r in results)} applied, "
+            f"{sum(r['status'] == 'failed' for r in results)} failed.",
+            results=results,
+        )
+    except Exception as exc:
+        _set_apply_job(run_id, status="failed", message=str(exc))
 
 
 def _score_one_job(job_data: dict, resume_profile: dict) -> tuple[int, dict | None, str | None]:
@@ -236,6 +322,47 @@ def mark_job_applied(job_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "applied": job.applied}
+
+
+@app.post("/api/agent-apply", status_code=202)
+def start_agent_apply(background_tasks: BackgroundTasks):
+    """Start the real auto-apply runner for eligible supported jobs."""
+    from apply import is_supported
+    from lib.db import get_eligible_jobs
+
+    if any(job.get("status") in {"queued", "running"} for job in _apply_jobs.values()):
+        raise HTTPException(status_code=409, detail="An agent apply run is already in progress")
+
+    jobs = [
+        job for job in get_eligible_jobs()
+        if job.get("auto_apply_ready") and is_supported(job.get("url", ""))
+    ]
+    if not jobs:
+        raise HTTPException(
+            status_code=400,
+            detail="No eligible auto-apply jobs found. Jobs must be Saved, auto-apply ready, and on Lever or Greenhouse.",
+        )
+
+    run_id = uuid.uuid4().hex
+    with _apply_jobs_lock:
+        _apply_jobs[run_id] = {
+            "status": "queued",
+            "message": f"Queued {len(jobs)} eligible roles.",
+            "total": len(jobs),
+            "completed": 0,
+            "results": [],
+        }
+    background_tasks.add_task(_process_apply_job, run_id)
+    return {"status": "queued", "run_id": run_id, "eligible_count": len(jobs)}
+
+
+@app.get("/api/agent-apply/status/{run_id}")
+def agent_apply_status(run_id: str):
+    with _apply_jobs_lock:
+        status = _apply_jobs.get(run_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Agent apply run not found")
+    return status
 
 
 VALID_STATUSES = [

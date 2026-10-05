@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   ArrowUpRight,
+  Bot,
   BriefcaseBusiness,
   Calendar,
   Check,
@@ -895,6 +896,8 @@ function App() {
   const [uploadingResume, setUploadingResume] = useState(false);
   const [resumeMessage, setResumeMessage] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [applyingJobs, setApplyingJobs] = useState(false);
+  const [applyMessage, setApplyMessage] = useState("");
   const resumeInputRef = useRef(null);
   const PAGE_SIZE = 9;
 
@@ -996,6 +999,44 @@ function App() {
     }
   };
 
+  const startAgentApply = async () => {
+    const eligibleCount = jobs.filter((job) =>
+      job.auto_apply_ready
+      && job.status === "Saved"
+      && (job.retry_count || 0) < 3
+      && ["lever.co", "greenhouse.io"].some((platform) => job.url?.includes(platform))
+    ).length;
+    if (!eligibleCount) {
+      setApplyMessage("No eligible saved roles are ready for agent apply.");
+      return;
+    }
+    if (!window.confirm(`Start agent apply for ${eligibleCount} eligible role${eligibleCount === 1 ? "" : "s"}?`)) return;
+
+    setApplyingJobs(true);
+    setApplyMessage("Starting agent apply…");
+    try {
+      const response = await axios.post(`${API_URL}/api/agent-apply`);
+      const { run_id: runId } = response.data;
+      let finished = false;
+      while (!finished) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const statusResponse = await axios.get(`${API_URL}/api/agent-apply/status/${runId}`);
+        const status = statusResponse.data;
+        setApplyMessage(status.message);
+        if (status.status === "completed") {
+          await fetchJobs(false);
+          finished = true;
+        } else if (status.status === "failed") {
+          throw new Error(status.message || "Agent apply failed.");
+        }
+      }
+    } catch (error) {
+      setApplyMessage(error.response?.data?.detail || error.message || "Agent apply failed.");
+    } finally {
+      setApplyingJobs(false);
+    }
+  };
+
   if (loading) {
     return <div className="loader"><div className="loader-mark"><RamlalMark size={25} /></div><strong>Preparing your workspace</strong><span>Finding your best opportunities…</span></div>;
   }
@@ -1039,7 +1080,7 @@ function App() {
 
   const renderOverview = () => (
     <>
-      <section className="welcome-section"><div><p className="eyebrow">Monday, October 5, 2026</p><h1>Your next great role starts here.</h1><p className="welcome-copy">Stay focused, keep momentum, and let your best opportunities rise to the top.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={downloadResume}><Download size={15} /> Resume</button><button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh matches</button></div></section>
+      <section className="welcome-section"><div><p className="eyebrow">Monday, October 5, 2026</p><h1>Your next great role starts here.</h1><p className="welcome-copy">Stay focused, keep momentum, and let your best opportunities rise to the top.</p></div><div className="welcome-actions"><button className="secondary-button" onClick={downloadResume}><Download size={15} /> Resume</button><button className="secondary-button agent-apply-button" onClick={startAgentApply} disabled={applyingJobs}><Bot size={15} /> {applyingJobs ? "Agent applying…" : "Agent apply"}</button><button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh matches</button>{applyMessage && <span className="apply-message">{applyMessage}</span>}</div></section>
       <Metrics />
       <section className="overview-grid"><div className="content-panel"><div className="panel-heading"><div><h2>Recommended for you</h2><p>High-confidence matches based on your resume.</p></div><button className="text-button" onClick={() => goTo("recommended")}>View all <ArrowUpRight size={14} /></button></div><div className="mini-job-list">{recommendedJobs.slice(0, 4).map((job) => <JobCard key={job.id} job={job} />)}</div>{!recommendedJobs.length && <EmptyState title="No recommendations yet" text="Refresh your matches to discover new roles." />}</div><PipelineSummary /></section>
     </>
@@ -1066,7 +1107,7 @@ function App() {
     const visibleJobs = source.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
     const firstVisible = source.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
     const lastVisible = Math.min(currentPage * PAGE_SIZE, source.length);
-    return <><section className="page-intro"><div><p className="eyebrow">{isRecommended ? "Curated matches" : isApplications ? "Your progress" : "Opportunity library"}</p><h1>{isRecommended ? "Recommended roles" : isApplications ? "Application pipeline" : "All opportunities"}</h1><p className="welcome-copy">{isRecommended ? "Roles with the strongest fit and the clearest next step." : isApplications ? "Track every role you have moved beyond the discovery stage." : "Every role discovered, scored, and ready for your review."}</p></div><button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh data</button></section><div className="listing-toolbar">{renderFilterBar()}<button className={`view-toggle ${compactView ? "active" : ""}`} onClick={() => setCompactView((value) => !value)}><Settings2 size={15} /> {compactView ? "Comfortable view" : "Compact view"}</button></div><div className="listing-meta"><strong>{source.length}</strong> roles in this view {source.length > 0 && <span>Showing {firstVisible}–{lastVisible}</span>} {lastRefresh && <span>Last refreshed {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>{source.length ? <><div className={`job-grid ${compactView ? "compact-grid" : ""}`}>{visibleJobs.map((job) => <JobCard key={job.id} job={job} />)}</div>{pageCount > 1 && <div className="pagination" aria-label="Job pagination"><button type="button" className="pagination-button" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} aria-label="First page"><ChevronsLeft size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page"><ChevronLeft size={14} /></button><div className="pagination-pages">{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" key={page} className={`pagination-page ${page === currentPage ? "active" : ""}`} onClick={() => setCurrentPage(page)} aria-current={page === currentPage ? "page" : undefined}>{page}</button>)}</div><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))} disabled={currentPage === pageCount} aria-label="Next page"><ChevronRight size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage(pageCount)} disabled={currentPage === pageCount} aria-label="Last page"><ChevronsRight size={14} /></button></div>}</> : <EmptyState title="Nothing matches these filters" text="Try clearing a filter or browse a different workspace view." />}</>;
+    return <><section className="page-intro"><div><p className="eyebrow">{isRecommended ? "Curated matches" : isApplications ? "Your progress" : "Opportunity library"}</p><h1>{isRecommended ? "Recommended roles" : isApplications ? "Application pipeline" : "All opportunities"}</h1><p className="welcome-copy">{isRecommended ? "Roles with the strongest fit and the clearest next step." : isApplications ? "Track every role you have moved beyond the discovery stage." : "Every role discovered, scored, and ready for your review."}</p></div><div className="page-intro-actions">{(isRecommended || isApplications) && <button className="secondary-button agent-apply-button" onClick={startAgentApply} disabled={applyingJobs}><Bot size={15} /> {applyingJobs ? "Agent applying…" : "Agent apply"}</button>}<button className="primary-button" onClick={() => fetchJobs(false)}><Sparkles size={15} /> Refresh data</button></div></section>{applyMessage && <div className="apply-message listing-apply-message">{applyMessage}</div>}<div className="listing-toolbar">{renderFilterBar()}<button className={`view-toggle ${compactView ? "active" : ""}`} onClick={() => setCompactView((value) => !value)}><Settings2 size={15} /> {compactView ? "Comfortable view" : "Compact view"}</button></div><div className="listing-meta"><strong>{source.length}</strong> roles in this view {source.length > 0 && <span>Showing {firstVisible}–{lastVisible}</span>} {lastRefresh && <span>Last refreshed {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}</div>{source.length ? <><div className={`job-grid ${compactView ? "compact-grid" : ""}`}>{visibleJobs.map((job) => <JobCard key={job.id} job={job} />)}</div>{pageCount > 1 && <div className="pagination" aria-label="Job pagination"><button type="button" className="pagination-button" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} aria-label="First page"><ChevronsLeft size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page"><ChevronLeft size={14} /></button><div className="pagination-pages">{Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => <button type="button" key={page} className={`pagination-page ${page === currentPage ? "active" : ""}`} onClick={() => setCurrentPage(page)} aria-current={page === currentPage ? "page" : undefined}>{page}</button>)}</div><button type="button" className="pagination-button" onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))} disabled={currentPage === pageCount} aria-label="Next page"><ChevronRight size={14} /></button><button type="button" className="pagination-button" onClick={() => setCurrentPage(pageCount)} disabled={currentPage === pageCount} aria-label="Last page"><ChevronsRight size={14} /></button></div>}</> : <EmptyState title="Nothing matches these filters" text="Try clearing a filter or browse a different workspace view." />}</>;
   };
 
   const renderProfile = () => <><section className="page-intro"><div><p className="eyebrow">Your foundation</p><h1>Profile & resume</h1><p className="welcome-copy">Keep your application materials close and ready for the next opportunity.</p></div><button className="primary-button" onClick={() => resumeInputRef.current?.click()} disabled={uploadingResume}><Upload size={15} /> {uploadingResume ? "Updating ratings…" : "Upload latest resume"}</button></section><input ref={resumeInputRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={uploadResume} /><div className="profile-grid"><div className="profile-card profile-hero"><div className="large-avatar">S</div><div><h2>Sparsh</h2><p>Candidate profile</p><span className="profile-status"><i /> Resume available</span></div></div><div className="profile-card"><div className="profile-card-title"><UserRound size={16} /><h3>Profile readiness</h3></div><div className="readiness-track"><i style={{ width: "86%" }} /></div><strong className="readiness-value">86%</strong><p className="card-note">Your resume is being used to score every opportunity.</p></div><div className="profile-card profile-details"><div className="profile-card-title"><BriefcaseBusiness size={16} /><h3>Workspace details</h3></div><div className="detail-row"><span>Roles tracked</span><strong>{jobs.length}</strong></div><div className="detail-row"><span>Average match</span><strong>{averageScore}/10</strong></div><div className="detail-row"><span>Ready to apply</span><strong>{recommendedJobs.length}</strong></div></div><div className="profile-card resume-card"><div className="resume-illustration"><FileIcon /></div><div><h3>Resume.pdf</h3><p>Upload a newer PDF to refresh this profile and recalculate every job score.</p><div className="resume-actions"><button className="secondary-button" onClick={downloadResume}><Download size={14} /> Open resume</button><button className="secondary-button" onClick={() => resumeInputRef.current?.click()} disabled={uploadingResume}><Upload size={14} /> Replace</button></div>{resumeMessage && <span className="resume-message">{resumeMessage}</span>}</div></div></div></>;
