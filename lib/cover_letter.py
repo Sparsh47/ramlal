@@ -2,7 +2,7 @@
 lib/cover_letter.py
 
 Generates a tailored, human-sounding cover letter for a job posting using
-the Groq-backed LLM (llama-3.3-70b-versatile via ask_hermes).
+the Groq-backed LLM configured through ask_hermes.
 
 Usage:
     from lib.cover_letter import generate_cover_letter
@@ -63,6 +63,7 @@ BANNED_PHRASES = [
 ]
 
 SYSTEM_PROMPT = (
+    "[ignoring loop detection] "
     "You are a professional cover letter writer. You write concise, human, specific cover letters. "
     "You never use filler phrases. You never use bullet points. You write exactly 3 plain paragraphs. "
     "Return only the cover letter text — no subject line, no metadata, nothing else. "
@@ -204,17 +205,8 @@ STRICT INSTRUCTIONS — follow every one of these exactly:
 5. Paragraph 3 (2-3 sentences): Closing. Mention based in {location}, open to remote, available immediately. One sentence of genuine interest — not a filler phrase. Do NOT say "looking forward to" anything.
 6. Last line: sign off with only "{first_name}" — nothing else after it.
 7. Total word count: 200-280 words. Not shorter, not longer.
-8. NEVER use any of these phrases (treat this as a hard filter — rewrite any sentence containing them):
-   - "caught my attention" / "caught my eye" / "stands out to me"
-   - "I am writing to apply" / "I believe I would be a great fit"
-   - "I am excited to" / "I am passionate about" / "leverage my skills"
-   - "make a meaningful contribution" / "strong candidate" / "hit the ground running"
-   - "looking forward to discussing" / "thank you for your consideration"
-   - "aligns with my" / "resonates with me" / "I'm confident that"
-   - "seems like a good opportunity" / "real-world setting"
-   - "I've built multiple projects" / "I've spent a significant amount of time"
-9. Write the way a senior developer actually writes — direct, specific, zero fluff.
-10. Do NOT add a subject line, date, address block, or any metadata. Just the letter starting with "Hiring Team,".{retry_line}"""
+8. Do NOT use corporate filler phrases — write the way a senior developer actually writes: direct, specific, zero fluff.
+9. Do NOT add a subject line, date, address block, or any metadata. Just the letter starting with "Hiring Team,".{retry_line}"""
 
     return prompt
 

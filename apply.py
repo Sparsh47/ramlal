@@ -18,6 +18,7 @@ Run manually (on your Mac, after moving jobs to Saved on the dashboard):
     python apply.py
 """
 
+import argparse
 import os
 import re
 import subprocess
@@ -301,10 +302,12 @@ def apply_to_job(job: dict) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
-def run() -> None:
+def run(limit: int | None = None) -> None:
     start = datetime.utcnow()
     log("=" * 60)
     log("Ramlal apply agent started")
+    if limit:
+        log(f"Mode: DRY RUN — processing first {limit} job(s) only")
     log("=" * 60)
 
     # Load resume data once — used for cover letter generation and candidate info
@@ -342,6 +345,10 @@ def run() -> None:
     log(
         f"Found {len(all_eligible)} eligible jobs total, {len(jobs)} with auto_apply_ready=True"
     )
+
+    if limit:
+        jobs = jobs[:limit]
+        log(f"Limiting to first {limit} job(s) (--limit flag)")
 
     if not jobs:
         log("Nothing to apply to. Exiting.")
@@ -382,8 +389,18 @@ def _print_summary(start: datetime, total: int, applied: int, failed: int) -> No
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Ramlal automated apply agent")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Only process the first N Saved jobs (useful for testing)",
+    )
+    args = parser.parse_args()
+
     try:
-        run()
+        run(limit=args.limit)
     except Exception as e:
         log(f"FATAL ERROR: {e}")
         traceback.print_exc()

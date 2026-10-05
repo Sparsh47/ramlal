@@ -44,6 +44,7 @@ class Job(Base):
     title = Column(String)
     company = Column(String)
     reasons = Column(Text)
+    snippet = Column(Text, nullable=True)
     url = Column(String, unique=True, index=True)
     date_found = Column(DateTime, default=datetime.utcnow)
     applied = Column(Boolean, default=False)
@@ -78,6 +79,7 @@ def run_migrations():
                 "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS last_attempted_at TIMESTAMP"
             )
         )
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS snippet TEXT"))
         conn.commit()
 
 
@@ -115,6 +117,7 @@ def save_to_db(jobs: list[dict]):
                 title=job_data.get("title", ""),
                 company=job_data.get("company", ""),
                 reasons=job_data.get("reasons", ""),
+                snippet=job_data.get("snippet", ""),
                 url=url,
                 date_found=datetime.utcnow(),
             )

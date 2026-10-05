@@ -1,5 +1,10 @@
 import os
 import sys
+import tempfile
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # Add the root directory to the python path so we can import from lib
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7,25 +12,33 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
+from config.resume_parser import parse_resume
 from lib.db import Job, SessionLocal
+from lib.job_scorer import score_job
 
 app = FastAPI(title="Job Agent API")
+_resume_jobs: dict[str, dict] = {}
+_resume_jobs_lock = threading.Lock()
 
-# Allow requests from our frontend
+frontend_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "FRONTEND_URLS",
+        "https://ramlal-blush.vercel.app,http://localhost:5173,http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://ramlal-blush.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:3000",
-    ],
+    allow_origins=frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,6 +67,7 @@ class JobResponse(BaseModel):
     title: Optional[str] = ""
     company: Optional[str] = ""
     reasons: Optional[str] = ""
+    snippet: Optional[str] = ""
     url: Optional[str] = ""
     applied: Optional[bool] = False
     status: Optional[str] = "New"
@@ -69,6 +83,106 @@ class JobResponse(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+def _resume_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resume.pdf"
+    )
+
+
+def _job_for_scoring(job: Job) -> dict:
+    return {
+        "title": job.title or "",
+        "company": job.company or "",
+        "url": job.url or "",
+        "snippet": job.snippet or job.reasons or "",
+    }
+
+
+def _set_resume_job(job_id: str, **updates):
+    with _resume_jobs_lock:
+        _resume_jobs[job_id].update(updates)
+
+
+def _score_one_job(job_data: dict, resume_profile: dict) -> tuple[int, dict | None, str | None]:
+    try:
+        return job_data["id"], score_job(job_data, resume_profile, retries=1), None
+    except Exception as exc:
+        return job_data["id"], None, str(exc)
+
+
+def _process_resume_upload(job_id: str, temporary_path: Path, destination: Path):
+    """Parse and re-score outside the request so uploads never block the API."""
+    try:
+        _set_resume_job(job_id, status="parsing", message="Parsing your resume…")
+        resume_profile = parse_resume(str(temporary_path))
+        os.replace(temporary_path, destination)
+
+        db = SessionLocal()
+        try:
+            jobs = db.query(Job).order_by(Job.score.desc()).all()
+            job_data = [_job_for_scoring(job) | {"id": job.id} for job in jobs]
+            _set_resume_job(
+                job_id,
+                status="rescoring",
+                message=f"Refreshing {len(job_data)} job ratings…",
+                total=len(job_data),
+                completed=0,
+            )
+
+            updated_ids = set()
+            failed_jobs = []
+            completed = 0
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(job_data)))) as executor:
+                futures = [
+                    executor.submit(_score_one_job, data, resume_profile)
+                    for data in job_data
+                ]
+                for future in as_completed(futures):
+                    job_id_result, rescored, error = future.result()
+                    completed += 1
+                    if rescored:
+                        job = db.query(Job).filter(Job.id == job_id_result).first()
+                        if job:
+                            job.score = rescored.get("score", job.score)
+                            job.reasons = rescored.get("reasons", job.reasons)
+                            job.scored_on = "resume_refresh"
+                            updated_ids.add(job.id)
+                    else:
+                        failed_jobs.append({"id": job_id_result, "error": error})
+                    _set_resume_job(
+                        job_id,
+                        completed=completed,
+                        message=f"Refreshing job ratings… ({completed}/{len(job_data)})",
+                    )
+
+            db.commit()
+            updated_jobs = [
+                db.query(Job).filter(Job.id == updated_id).first()
+                for updated_id in updated_ids
+            ]
+            _set_resume_job(
+                job_id,
+                status="completed",
+                message=f"{len(updated_jobs)} job ratings updated.",
+                resume=resume_profile,
+                updated_count=len(updated_jobs),
+                failed_count=len(failed_jobs),
+                failed_jobs=failed_jobs,
+                jobs=[
+                    JobResponse.model_validate(job).model_dump()
+                    for job in updated_jobs
+                    if job
+                ],
+            )
+        finally:
+            db.close()
+    except Exception as exc:
+        _set_resume_job(job_id, status="failed", message=str(exc))
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 @app.get("/health")
@@ -168,11 +282,54 @@ def discard_job(job_id: int, db: Session = Depends(get_db)):
 @app.get("/api/resume")
 def download_resume():
     """Download the candidate's resume PDF."""
-    file_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resume.pdf"
-    )
+    file_path = _resume_path()
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Resume not found")
     return FileResponse(
         path=file_path, filename="resume.pdf", media_type="application/pdf"
     )
+
+
+@app.post("/api/resume", status_code=202)
+async def upload_resume(
+    background_tasks: BackgroundTasks, file: UploadFile = File(...)
+):
+    """Accept a resume quickly and process parsing/re-scoring in the background."""
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=415, detail="Only PDF resumes are supported")
+
+    destination = Path(_resume_path())
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".pdf", dir=destination.parent, delete=False
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+        total_bytes = 0
+        while chunk := await file.read(1024 * 1024):
+            total_bytes += len(chunk)
+            if total_bytes > 10 * 1024 * 1024:
+                temporary_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413, detail="Resume must be 10 MB or smaller"
+                )
+            temporary_file.write(chunk)
+    await file.close()
+
+    job_id = uuid.uuid4().hex
+    with _resume_jobs_lock:
+        _resume_jobs[job_id] = {
+            "status": "queued",
+            "message": "Resume uploaded. Processing will start shortly…",
+            "total": 0,
+            "completed": 0,
+        }
+    background_tasks.add_task(_process_resume_upload, job_id, temporary_path, destination)
+    return {"status": "queued", "job_id": job_id}
+
+
+@app.get("/api/resume/status/{job_id}")
+def resume_status(job_id: str):
+    with _resume_jobs_lock:
+        status = _resume_jobs.get(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Resume processing job not found")
+    return status
